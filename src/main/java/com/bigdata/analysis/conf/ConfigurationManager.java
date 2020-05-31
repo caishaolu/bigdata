@@ -4,7 +4,6 @@ import java.io.InputStream;
 import java.util.Properties;
 
 /**
- * Copyright@www.chiefclouds.com.
  * Author:Mid_tsai
  * Date:2020/5/26
  * Description:
