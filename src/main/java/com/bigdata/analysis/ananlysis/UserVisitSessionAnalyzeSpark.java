@@ -50,61 +50,60 @@ import com.alibaba.fastjson.JSONObject;
  */
 
 
-
 public class UserVisitSessionAnalyzeSpark {
 
-    public static void main(String[] args) {
-        args = new String[]{"2"};
+            public static void main(String[] args) {
+                args = new String[]{"2"};
 
-        // 构建Spark上下文
-        SparkConf conf = new SparkConf()
-                .setAppName(Constants.SPARK_APP_NAME_SESSION)
-                .setMaster("local");
-        JavaSparkContext sc = new JavaSparkContext(conf);
-        SQLContext sqlContext = getSQLContext(sc.sc());
+                // 构建Spark上下文
+                SparkConf conf = new SparkConf()
+                        .setAppName(Constants.SPARK_APP_NAME_SESSION)
+                        .setMaster("local");
+                JavaSparkContext sc = new JavaSparkContext(conf);
+                SQLContext sqlContext = getSQLContext(sc.sc());
 
-        // 加载数据
+                // 加载数据
 
-        SparkUtils.loadData(sc,sqlContext);
+                SparkUtils.loadData(sc,sqlContext);
 
-        // 创建需要使用的DAO组件
-        ITaskDAO taskDAO = DAOFactory.getTaskDAO();
+                // 创建需要使用的DAO组件
+                ITaskDAO taskDAO = DAOFactory.getTaskDAO();
 
-        // 首先得查询出来指定的任务，并获取任务的查询参数
-        //long taskid = ParamUtils.getTaskIdFromArgs(args,Constants.SPARK_LOCAL_TASKID_PAGE);
-        long taskid = 1;
-        Task task = taskDAO.findById(taskid);
-        JSONObject taskParam = JSONObject.parseObject(task.getTaskParam());
+                // 首先得查询出来指定的任务，并获取任务的查询参数
+                //long taskid = ParamUtils.getTaskIdFromArgs(args,Constants.SPARK_LOCAL_TASKID_PAGE);
+                long taskid = 1;
+                Task task = taskDAO.findById(taskid);
+                JSONObject taskParam = JSONObject.parseObject(task.getTaskParam());
 
-        // 如果要进行session粒度的数据聚合
-        // 首先要从user_visit_action表中，查询出来指定日期范围内的行为数据
-        JavaRDD<Row> actionRDD = getActionRDDByDateRange(sqlContext, taskParam);
-        System.out.println("actionRDD"+actionRDD.count());
-        JavaPairRDD<String, Row> sessionid2actionRDD = getSessionid2ActionRDD(actionRDD);
-        System.out.println("sessionid2actionRDD"+sessionid2actionRDD.count());
-        // 首先，可以将行为数据，按照session_id进行groupByKey分组
-        // 此时的数据的粒度就是session粒度了，然后呢，可以将session粒度的数据
-        // 与用户信息数据，进行join
-        // 然后就可以获取到session粒度的数据，同时呢，数据里面还包含了session对应的user的信息
-        // 到这里为止，获取的数据是<sessionid,(sessionid,searchKeywords,clickCategoryIds,age,professional,city,sex)>
-        JavaPairRDD<String, String> sessionid2AggrInfoRDD =
-                aggregateBySession(sqlContext, actionRDD);
+                // 如果要进行session粒度的数据聚合
+                // 首先要从user_visit_action表中，查询出来指定日期范围内的行为数据
+                JavaRDD<Row> actionRDD = getActionRDDByDateRange(sqlContext, taskParam);
+                System.out.println("actionRDD"+actionRDD.count());
+                JavaPairRDD<String, Row> sessionid2actionRDD = getSessionid2ActionRDD(actionRDD);
+                System.out.println("sessionid2actionRDD"+sessionid2actionRDD.count());
+                // 首先，可以将行为数据，按照session_id进行groupByKey分组
+                // 此时的数据的粒度就是session粒度了，然后呢，可以将session粒度的数据
+                // 与用户信息数据，进行join
+                // 然后就可以获取到session粒度的数据，同时呢，数据里面还包含了session对应的user的信息
+                // 到这里为止，获取的数据是<sessionid,(sessionid,searchKeywords,clickCategoryIds,age,professional,city,sex)>
+                JavaPairRDD<String, String> sessionid2AggrInfoRDD =
+                        aggregateBySession(sqlContext, actionRDD);
 
-        System.out.println("sessionid2AggrInfoRDD:"+sessionid2AggrInfoRDD.count());
-        // 接着，就要针对session粒度的聚合数据，按照使用者指定的筛选参数进行数据过滤
-        // 相当于自己编写的算子，是要访问外面的任务参数对象的
-        sessionid2AggrInfoRDD.foreachPartition(new VoidFunction<Iterator<Tuple2<String, String>>>() {
-            @Override
-            public void call(Iterator<Tuple2<String, String>> tuple2Iterator) throws Exception {
-                while (tuple2Iterator.hasNext()) {
-                    Tuple2<String, String> tuple2 = tuple2Iterator.next();
-                    System.out.println(String.format(" tuple %s:%s",tuple2._1,tuple2._2));
-                }
-            }
-        });
+                System.out.println("sessionid2AggrInfoRDD:"+sessionid2AggrInfoRDD.count());
+                // 接着，就要针对session粒度的聚合数据，按照使用者指定的筛选参数进行数据过滤
+                // 相当于自己编写的算子，是要访问外面的任务参数对象的
+                sessionid2AggrInfoRDD.foreachPartition(new VoidFunction<Iterator<Tuple2<String, String>>>() {
+                    @Override
+                    public void call(Iterator<Tuple2<String, String>> tuple2Iterator) throws Exception {
+                        while (tuple2Iterator.hasNext()) {
+                            Tuple2<String, String> tuple2 = tuple2Iterator.next();
+                            System.out.println(String.format(" tuple %s:%s",tuple2._1,tuple2._2));
+                        }
+                    }
+                });
 
-        // 重构，同时进行过滤和统计; 新知识, spark 计数器的使用
-        Accumulator<String> sessionAggrStatAccumulator = sc.accumulator(
+                // 重构，同时进行过滤和统计; 新知识, spark 计数器的使用
+                Accumulator<String> sessionAggrStatAccumulator = sc.accumulator(
                 "", new SessionAggrStatAccumulator());
 
         JavaPairRDD<String, String> filteredSessionid2AggrInfoRDD = filterSessionAndAggrStat(
